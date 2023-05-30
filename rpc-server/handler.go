@@ -13,8 +13,47 @@ import (
 type IMServiceImpl struct{}
 
 func (s *IMServiceImpl) Pull(ctx context.Context, req *rpc.PullRequest) (*rpc.PullResponse, error) {
+	roomID, err := getRoomID(req.GetChat())
+	if err != nil {
+		return nil, err
+	}
+
+	start := req.GetCursor()
+	end := start + int64(req.GetLimit()) // did not minus 1 on purpose for hasMore check later on
+
+	messages, err := rdb.GetMessagesByRoomID(ctx, roomID, start, end, req.GetReverse())
+	if err != nil {
+		return nil, err
+	}
+
+	respMessages := make([]*rpc.Message, 0)
+	var counter int32 = 0
+	var nextCursor int64 = 0
+	hasMore := false
+	for _, msg := range messages {
+		if counter+1 > req.GetLimit() {
+			// having extra value here means it has more data
+			hasMore = true
+			nextCursor = end
+			break // do not return the last message
+		}
+		temp := &rpc.Message{
+			Chat:     req.GetChat(),
+			Text:     msg.Message,
+			Sender:   msg.Sender,
+			SendTime: msg.Timestamp,
+		}
+		respMessages = append(respMessages, temp)
+		counter += 1
+	}
+
 	resp := rpc.NewPullResponse()
-	resp.Code, resp.Msg = areYouLucky()
+	resp.Messages = respMessages
+	resp.Code = 0
+	resp.Msg = "success"
+	resp.HasMore = &hasMore
+	resp.NextCursor = &nextCursor
+
 	return resp, nil
 }
 
